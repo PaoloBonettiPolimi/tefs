@@ -36,7 +36,7 @@ requires-python = ">=3.9"
 
 [project.urls]
 Homepage = "https://github.com/teobucci/tefs"
-Documentation = "https://github.com/teobucci/tefs"
+Documentation = "https://teobucci.github.io/tefs/"
 Repository = "https://github.com/teobucci/tefs"
 
 [tool.pdm.dev-dependencies]
