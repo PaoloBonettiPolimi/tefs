@@ -1,12 +1,13 @@
-from multiprocessing.pool import ThreadPool
+from multiprocessing.pool import ThreadPool, Pool
 from typing import List
 
 import matplotlib
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import warnings
 
-from .estimation import estimate_conditional_transfer_entropy
+from .estimation import estimate_conditional_transfer_entropy,estimate_conditional_mutual_information_for_TEFS
 from .types import IterationResult
 
 
@@ -15,16 +16,21 @@ class TEFS:
             self,
             features: np.ndarray,
             target: np.ndarray,
-            k: int,
-            lag_features: list[int],
-            lag_target: list[int],
-            direction: str,
+            #k: int,
+            lag_features: list[int] = [],
+            lag_target: list[int] = [],
+            direction: str="forward",
+            k: int = -1,
             verbose: int = 1,
             var_names: list[str] = None,
             n_jobs: int = 1,
+            cycle_len : int = None,
+            full_fit: bool = True,
+            known_conditioning: list[str] = None,
+            estimation_type: str = "TE_knn"
             ) -> List[IterationResult]:
         """
-        Perform the forward or backward feature selection based on the Transfer Entropy score.
+        Perform the forward or backward feature selection based on the Transfer Entropy(TE) or Conditional Mutual Information(CMI) score.
 
         :param features: Sample of a (multivariate) random variable representing the input
         :type features: np.ndarray of shape (n_samples, n_features)
@@ -38,35 +44,72 @@ class TEFS:
         :type lag_target: list[int]
         :param direction: the direction of the transfer entropy, either "forward" or "backward"
         :type direction: str
-        :param verbose: verbosity level
+        :param verbose: verbosity level.  For -1 it turns off also the warnings.
         :type verbose: int
         :param var_names: names of the variables/features
         :type var_names: list[str]
         :param n_jobs: number of parallel jobs to run
         :type n_jobs: int
+        :param cycle_len: the length of the disjoint cycles to consider for the cyclic estimation, if None the algorithm will consider a continuous time series
+        :type cycle_len: int
+        :param full_fit: if False, the algorithm will stop when the TE/CMI score is negative, otherwise it will continue until the end
+        :type full_fit: bool
+        :param known_conditioning: list of known conditioning variables
+        :type known_conditioning: list[str]
+        :param estimation_type: the type of estimation to use for the score, either "TE_knn" or "CMI_knn"
+        :type estimation_type: str
+
         :return: list of indexes of the selected features
         :rtype: List[IterationResult]
         """
 
-        # Validate direction argument
+        ### Validate  argument
         if direction not in ['forward', 'backward']:
             raise ValueError("direction must be either 'forward' or 'backward'")
+
+        if estimation_type not in ['TE_knn', 'CMI_knn']:
+            raise ValueError("estimation_type must be either 'TE_knn' or 'CMI_knn'")
 
         if var_names and not len(var_names) == features.shape[1]:
             raise ValueError("var_names must have the same length as the number of features")
         
         if var_names is None:
             var_names = [f"{i+1}" for i in range(features.shape[1])]
-        
+
+        ### Initializations
         self.features = features
         self.target = target
-        self.k = k
-        self.lag_features = lag_features
-        self.lag_target = lag_target
+        self.k = k if k > 0 else int(np.sqrt(len(target)))
+        self.lag_features = lag_features if len(lag_features) > 0 else [0]
+
+        if estimation_type == "TE_knn":
+            self.lag_target = lag_target if len(lag_target) > 0 else [1]
+        else: # CMI_knn
+            self.lag_target = lag_target if len(lag_target) > 0 else [0]
+        if verbose >= 0:
+            if (estimation_type == "TE_knn") and (0 in self.lag_target):
+                warnings.warn("TE_knn requires lag_target to NOT include 0, so the algorithm will revome it")
+            if (estimation_type == "CMI_knn") and (0 not in self.lag_target):
+                warnings.warn("CMI_knn requires lag_target to include 0, so the algorithm will add it")
+        
         self.direction = direction
         self.verbose = verbose
         self.var_names = var_names
         self.n_jobs = n_jobs
+
+        if cycle_len is not None:
+            if  cycle_len <= max(max(self.lag_features), max(self.lag_target)):
+                raise ValueError("maximum lag must be smaller than cycle_len")
+            if  cycle_len < 0:
+                raise ValueError("cycle_len must be None or a positive integer") 
+            if (verbose >= 0) and (self.features.shape[0] % cycle_len != 0):
+                warnings.warn("The length of the time series is not a multiple of the cycle length, the last cycle will be discarded")
+        self.cycle_len = cycle_len
+
+        self.full_fit = full_fit
+        self.known_conditioning = known_conditioning if known_conditioning != None else []
+        self.estimation_type = estimation_type
+        self.score_name = "TE" if estimation_type == "TE_knn" else "CMI"
         self.result = None
     
     def get_result(self) -> List[IterationResult]:
@@ -95,9 +138,11 @@ class TEFS:
         else:
             return self.__tefs_backward()
         
+
+        
     def __tefs_forward(self) -> None:
         """
-        Perform the forward selection of features based on the Transfer Entropy score.
+        Perform the forward selection of features based on the TE/CMI score.
 
         :return: list of indexes of the selected features
         :rtype: List[IterationResult]
@@ -106,6 +151,15 @@ class TEFS:
         df = pd.DataFrame(self.features)
         selected_features = list()
         candidate_features = list(range(self.features.shape[1]))
+
+        ######################
+        if len(self.known_conditioning) > 0:
+            selected_features = [self.var_names.index(el) for el in self.known_conditioning]
+            for i in selected_features:
+                candidate_features.remove(i)
+        ######################         
+
+
         TE_cumulated = 0
         results = []
         iteration_count = 1
@@ -114,7 +168,6 @@ class TEFS:
 
             # check that there are still features to add
             if len(candidate_features) == 0:
-                print("No candidate features.")
                 break
 
             if self.verbose >= 2:
@@ -125,7 +178,7 @@ class TEFS:
                 print(f"Candidate Features: {[self.var_names[i] for i in candidate_features]}")
                 print(f"Selected Features: {[self.var_names[i] for i in selected_features]}")
 
-            # compute the TE scores for each feature
+            # compute the TE/CMI scores for each feature
             feature_scores = score_features(
                 features=df[candidate_features].values,
                 target=self.target,
@@ -135,6 +188,8 @@ class TEFS:
                 lag_target=self.lag_target,
                 direction="forward",
                 n_jobs=self.n_jobs,
+                cycle_len=self.cycle_len,
+                estimation_type=self.estimation_type
             )
 
             # i assume features_scores to be a dict wit
@@ -145,9 +200,9 @@ class TEFS:
 
             # print the scores
             if self.verbose >= 2:
-                print(f"TE_cumulated: {TE_cumulated}")
+                print(f"{self.score_name}_cumulated: {TE_cumulated}")
                 for key, value in feature_scores.items():
-                    print(f"TE score of feature {self.var_names[key]}: {value}")
+                    print(f"{self.score_name} score of feature {self.var_names[key]}: {value}")
 
             # sort the scores in descending order by value
             feature_scores = dict(sorted(feature_scores.items(), key=lambda item: item[1], reverse=True))
@@ -162,10 +217,10 @@ class TEFS:
             # by checking before selection of the feature
             # I DON'T make sure that at least one feature is selected
 
-            results.append({"feature_scores": feature_scores, "TE": TE_cumulated})
+            results.append({"feature_scores": feature_scores, f"{self.score_name}": TE_cumulated})
 
             if self.verbose >= 1 and self.var_names is not None:
-                print(f"Adding feature {self.var_names[max_feature_index]} with TE score: {max_TE}")
+                print(f"Adding feature {self.var_names[max_feature_index]} with {self.score_name} score: {max_TE}")
 
             # add the feature to the selected features list
             selected_features.append(max_feature_index)
@@ -176,11 +231,18 @@ class TEFS:
             if self.verbose >= 2:
                 print("-" * 80)
 
+
+            ######################
+            if self.full_fit == False:
+                if max_TE < 0 :
+                    break
+            ######################
+
         self.result = results
     
     def __tefs_backward(self) -> None:
         """
-        Perform the backward selection of features based on the Transfer Entropy score.
+        Perform the backward selection of features based on the TE/CMI score.
         """
 
         df = pd.DataFrame(self.features)
@@ -190,6 +252,13 @@ class TEFS:
         results = []
         iteration_count = 1
 
+        ######################
+        if len(self.known_conditioning) > 0:
+            selected_features = [self.var_names.index(el) for el in self.known_conditioning]
+            for i in selected_features:
+                candidate_features.remove(i)
+        ######################    
+ 
         while True:
             # check that there are still features to remove
             if len(candidate_features) == 0:
@@ -203,7 +272,7 @@ class TEFS:
                 print(f"Candidate Features: {[self.var_names[i] for i in candidate_features]}")
                 print(f"Selected Features: {[self.var_names[i] for i in selected_features]}")
 
-            # compute the TE scores for each feature
+            # compute the TE/CMI scores for each feature
             feature_scores = score_features(
                 features=df[candidate_features].values,
                 target=self.target,
@@ -213,6 +282,8 @@ class TEFS:
                 lag_target=self.lag_target,
                 direction="backward",
                 n_jobs=self.n_jobs,
+                cycle_len=self.cycle_len,
+                estimation_type=self.estimation_type
             )
 
             # i assume features_scores to be a dict wit
@@ -226,9 +297,9 @@ class TEFS:
 
             # print the scores
             if self.verbose >= 2:
-                print(f"TE_loss: {TE_loss}")
+                print(f"{self.score_name}_loss: {TE_loss}")
                 for key, value in feature_scores.items():
-                    print(f"TE score of feature {self.var_names[key]}: {value}")
+                    print(f"{self.score_name} score of feature {self.var_names[key]}: {value}")
 
             # find the first key value pair in the dictionary
             min_feature_index = int(next(iter(feature_scores)))
@@ -237,13 +308,13 @@ class TEFS:
             # increase the cumulative loss of information
             TE_loss += max(min_TE, 0)
 
-            results.append({"feature_scores": feature_scores, "TE": TE_loss})
+            results.append({"feature_scores": feature_scores, f"{self.score_name}": TE_loss})
 
             # by checking after the removal of the feature
             # I make it possible to not remove any feature
 
             if self.verbose >= 1 and self.var_names is not None:
-                print(f"Removing feature {self.var_names[min_feature_index]} with TE score: {min_TE}")
+                print(f"Removing feature {self.var_names[min_feature_index]} with {self.score_name} score: {min_TE}")
 
             # add the feature to the selected features list
             selected_features.append(min_feature_index)
@@ -254,6 +325,13 @@ class TEFS:
             if self.verbose >= 2:
                 print("-" * 80)
 
+
+            ######################
+            if self.full_fit == False:
+                if min_TE > 0 :
+                    break
+            ######################
+
         self.result = results
 
     def plot_te_results(
@@ -261,9 +339,9 @@ class TEFS:
             ax: matplotlib.axes.Axes,
             ) -> None:
         """
-        Plot the results of the TE estimation for each iteration.
+        Plot the results of the TE/CMI estimation for each iteration.
 
-        :param scores_iterations: A list of results of the TE scores, one per iteration.
+        :param scores_iterations: A list of results of the TE/CMI scores, one per iteration.
         :type scores_iterations: list[IterationResult]
         :param var_names: A list of variable names.
         :type var_names: list[str]
@@ -318,8 +396,9 @@ class TEFS:
 
         # Add labels and title
         ax.set_xlabel("Iteration")
-        ax.set_ylabel("TE score on target")
-        ax.set_title("TE score on target for each iteration")
+        ax.set_ylabel(f"{self.score_name} score on target")
+        ax.set_title(f"{self.score_name} score on target for each iteration")
+
 
         # Add horizontal line in 0, thick and red
         ax.axhline(y=0, color="r", linestyle="--", linewidth=3)
@@ -368,16 +447,16 @@ class TEFS:
         initial_features = None
 
         for iteration in self.result:
-            assert isinstance(iteration["TE"], (float, int)), "TE score must be a number"
+            assert isinstance(iteration[self.score_name], (float, int)), f"{self.score_name} score must be a number"
             assert isinstance(iteration["feature_scores"], dict), "feature_scores must be a dictionary"
 
             if initial_features is None:
                 initial_features = iteration["feature_scores"].keys()
 
             # First check if the threshold is reached
-            if iteration["TE"] > threshold:
+            if iteration[self.score_name] > threshold:
                 if self.verbose >= 1:
-                    print(f"Stopping condition reached: TE score {iteration['TE']} > threshold {threshold}")
+                    print(f"Stopping condition reached: {self.score_name} score {iteration[self.score_name]} > threshold {threshold}")
                 stop = True
 
             # Then check if the feature scores are all positive or negative
@@ -467,7 +546,9 @@ def score_features(
         lag_features: list[int],
         lag_target: list[int],
         direction: str,
-        n_jobs=1,
+        cycle_len: int,
+        n_jobs: int=1,
+        estimation_type: str = "TE_knn"
         ) -> np.ndarray:
     """
     Computes the transfer entropy score for each feature :math:`X_i` in :math:`X`, to the target :math:`Y`, given the conditioning set :math:`X_A`.
@@ -508,18 +589,40 @@ def score_features(
             target,  # Y
             conditioning_set,  # X_A
             k,
+            cycle_len,
             lag_features,
-            lag_target,
+            lag_target
         ))
 
-    with ThreadPool(n_jobs) as pool:
-        scores = pool.map(score_features_parallel, args)
+    ######################
+    if n_jobs == 1:
+        scores=[]
+        if estimation_type == "TE_knn":
+            for i in range(len(args)):
+                scores.append(estimate_conditional_transfer_entropy(*args[i]))
+        else:
+            for i in range(len(args)):
+                scores.append(estimate_conditional_mutual_information_for_TEFS(*args[i]))
+
+    else:
+        if estimation_type == "TE_knn":
+            with Pool(n_jobs) as pool:
+                scores = pool.map(score_features_parallel_TE, args)
+        else:
+            with Pool(n_jobs) as pool:
+                scores = pool.map(score_features_parallel_CMI, args)
+    ######################
 
     return np.array(scores)
 
-def score_features_parallel(args):
+def score_features_parallel_TE(args):
     """
-    Helper function to compute the score of a single feature in parallel.
+    Helper function to compute the score of a single feature in parallel for TE.
     """
     return estimate_conditional_transfer_entropy(*args)
 
+def score_features_parallel_CMI(args):
+    """
+    Helper function to compute the score of a single feature in parallel for CMI.
+    """
+    return estimate_conditional_mutual_information_for_TEFS(*args)
