@@ -114,6 +114,7 @@ class TEFS:
 
             # check that there are still features to add
             if len(candidate_features) == 0:
+                print("No Features to Add")
                 break
 
             if self.verbose >= 2:
