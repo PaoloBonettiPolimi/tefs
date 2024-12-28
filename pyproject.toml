@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tefs"
-version = "0.3.3"
+version = "1.0.0"
 authors = [
     { name = "Teo Bucci", email = "teobucci8@gmail.com" },
     { name = "Paolo Bonetti", email = "paolo.bonetti@polimi.it" },
@@ -63,7 +63,7 @@ build = [
 ]
 
 [tool.bumpver]
-current_version = "0.3.3"
+current_version = "1.0.0"
 version_pattern = "MAJOR.MINOR.PATCH"
 commit_message = "Bump version {old_version} -> {new_version}"
 commit = true

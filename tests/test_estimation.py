@@ -49,14 +49,14 @@ def test_estimate_conditional_transfer_entropy_1d_inputs(create_test_data):
     X = create_test_data((100,))
     Y = create_test_data((100,))
     Z = create_test_data((100,))
-    result = estimate_conditional_transfer_entropy(X, Y, Z, k=1)
+    result = estimate_conditional_transfer_entropy(X, Y, Z, k=1, cycle_len=None)
     assert isinstance(result, float), "The result should be a float."
 
 def test_estimate_conditional_transfer_entropy_different_lags(create_test_data):
     X = create_test_data((100, 2))
     Y = create_test_data((100, 1))
     Z = create_test_data((100, 3))
-    result = estimate_conditional_transfer_entropy(X, Y, Z, k=1, lag_features=[2], lag_target=[1], lag_conditioning=[3])
+    result = estimate_conditional_transfer_entropy(X, Y, Z, k=1, lag_features=[2], lag_target=[1], lag_conditioning=[3], cycle_len=None)
     assert isinstance(result, float), "The result should be a float."
     
 def test_estimate_conditional_transfer_entropy_with_no_lag_conditioning(create_test_data):
@@ -64,5 +64,5 @@ def test_estimate_conditional_transfer_entropy_with_no_lag_conditioning(create_t
     Y = create_test_data((100, 1))
     Z = create_test_data((100, 3))
     # Omit lag_conditioning to use default
-    result = estimate_conditional_transfer_entropy(X, Y, Z, k=1, lag_features=[2], lag_target=[1])
+    result = estimate_conditional_transfer_entropy(X, Y, Z, k=1, lag_features=[2], lag_target=[1], cycle_len=None)
     assert isinstance(result, float), "The result should be a float."
