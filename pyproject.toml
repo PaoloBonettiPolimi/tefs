@@ -35,9 +35,9 @@ dependencies = [
 requires-python = ">=3.9"
 
 [project.urls]
-Homepage = "https://github.com/teobucci/tefs"
-Documentation = "https://teobucci.github.io/tefs/"
-Repository = "https://github.com/teobucci/tefs"
+Homepage = "https://github.com/PaoloBonettiPolimi/tefs"
+Documentation = "https://PaoloBonettiPolimi.github.io/tefs/"
+Repository = "https://github.com/PaoloBonettiPolimi/tefs"
 
 [tool.pdm.dev-dependencies]
 docs = [
