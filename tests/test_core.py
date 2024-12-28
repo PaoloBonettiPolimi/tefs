@@ -14,14 +14,14 @@ def test_score_features_forward_direction(create_test_data):
     features = create_test_data((100, 5))
     target = create_test_data((100, 1))
     conditioning = create_test_data((100, 3))
-    scores = score_features(features, target, conditioning, k=1, lag_features=[1], lag_target=[1], direction="forward", n_jobs=1)
+    scores = score_features(features, target, conditioning, k=1, lag_features=[1], lag_target=[1], direction="forward", n_jobs=1, cycle_len=None)
     assert scores.shape == (5,), "Scores should have the same length as number of features."
 
 def test_score_features_backward_direction(create_test_data):
     features = create_test_data((100, 5))
     target = create_test_data((100, 1))
     conditioning = create_test_data((100, 5))
-    scores = score_features(features, target, conditioning, k=1, lag_features=[1], lag_target=[1], direction="backward", n_jobs=1)
+    scores = score_features(features, target, conditioning, k=1, lag_features=[1], lag_target=[1], direction="backward", n_jobs=1, cycle_len=None)
     assert scores.shape == (5,), "Scores should have the same length as number of features."
 
 def is_iteration_result(obj):
