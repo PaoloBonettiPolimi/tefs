@@ -193,6 +193,7 @@ class TEFS:
         while True:
             # check that there are still features to remove
             if len(candidate_features) == 0:
+                print("no candidate features.")
                 break
 
             if self.verbose >= 2:
