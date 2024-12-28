@@ -23,13 +23,16 @@ Refer to the documentation for usage examples.
 If you use this package in your research, please cite the following paper:
 
 ```bibtex
-@misc{bonetti2023causal,
-    title = {Causal {{Feature Selection}} via {{Transfer Entropy}}},
-    author = {Bonetti, Paolo and Metelli, Alberto Maria and Restelli, Marcello},
-    year = 2023,
-    eprint = {2310.11059},
-    archiveprefix = {arXiv},
-    primaryclass = {cs.LG}
+@INPROCEEDINGS{10651028,
+  author={Bonetti, Paolo and Metelli, Alberto Maria and Restelli, Marcello},
+  booktitle={2024 International Joint Conference on Neural Networks (IJCNN)}, 
+  title={Causal Feature Selection via Transfer Entropy}, 
+  year={2024},
+  volume={},
+  number={},
+  pages={1-10},
+  keywords={Machine learning algorithms;Time series analysis;Neural networks;Focusing;Feature extraction;Entropy;Data models;Feature selection;transfer entropy;causal feature selection;time series},
+  doi={10.1109/IJCNN60899.2024.10651028}
 }
 ```
 
